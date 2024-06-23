@@ -1,0 +1,96 @@
+app: application
+
+service:
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+    - protocol: TCP
+      port: 8443
+      targetPort: 8443
+    - protocol: TCP
+      port: 8081
+      targetPort: 8081
+
+prometheus:
+  enabled: true
+  port: 8081
+
+secman:
+  enabled: true
+
+os:
+  replicaCount: 1
+  containers:
+    app:
+      image:
+        registry:
+      resources:
+        limits:
+          cpu: 900m
+          mem: 1Gi
+        requests:
+          cpu: 800m
+          mem: 500Mi
+      env:
+        javaOpts:
+      
+      probes:
+        liveness:
+          httpGet:
+            path: /actuator/prometheus
+            port: 8081
+            scheme: HTTP
+          initialDelaySeconds: 0
+          timeoutSeconds: 10
+          periodSeconds: 15
+          successThreshold: 1
+          failureThreshold: 10
+        readiness:
+          httpGet:
+            path: /actuator/prometheus
+            port: 8081
+            scheme: HTTP
+          initialDelaySeconds: 0
+          timeoutSeconds: 10
+          periodSeconds: 15
+          successThreshold: 1
+          failureThreshold: 10
+        startupProbe:
+          httpGet:
+            path: /actuator/prometheus
+            port: 8081
+            scheme: HTTP
+          initialDelaySeconds: 60
+          timeoutSeconds: 10
+          periodSeconds: 15
+          successThreshold: 1
+          failureThreshold: 25
+    
+    fluent_bit:
+      volumeMountsPath:
+        app_logs: "/fluent-bit/logs"
+      image:
+        path: ...
+        hash: ...
+      resources:
+        limits:
+          cpu: 200m
+          mem: 400Mi
+        requests:
+          cpu: 200m
+          mem: 400Mi
+
+  secrets:
+    dbPassword:
+      volumeFileName: password
+      volumePath: /vault/secrets/spring/datasource/main
+      agentInjectName: app_db_pass
+      secmanKey: app_db_pass
+      secmanPath: ../../KV/common/db-secrets
+    dbUser:
+      volumeFileName: user
+      volumePath: /vault/secrets/spring/datasource/main
+      agentInjectName: app_db_user
+      secmanKey: app_db_user
+      secmanPath: ../../KV/common/db-secrets

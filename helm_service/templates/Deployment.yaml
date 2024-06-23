@@ -1,0 +1,159 @@
+apiVersion: v1
+kind: Deployment
+metadata:
+  annotations:
+    deployment.kubernetes.io/revision: '4'
+  name: {{ .Values.app }}
+  labels:
+    {{- include "application.labels" . | nindent 4 }}
+    app_version: {{ .Cahrt.AppVersion }}
+spec:
+  {{- include "application.deploy_strategy" . | nindent 2 }}
+  replicas: {{ .Values.os.replicaCount }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "application.labels" . | nindent 6 }}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+      {{- include "application.labels" . | nindent 8 }}
+      app_version: {{ .Cahrt.AppVersion }}
+      {{- if .Values.secman.enabled }}
+      secman-injector: enabled
+      {{- end }}
+    annotations:
+      sidecar.istio.io/inject: 'true'
+      {{- if .Values.prometheus.enabled }}
+        {{- include "application.prometheus" . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.secman.enabled }}
+        {{- include "application.vault_hashicorp_main_annotations" . | nindent 8 }}
+        {{- include "application.add_secman_secrets" ( list $ .Values.os.secrets ) | nindent 8 }}
+      {{- end }}
+      checksum/properties-config: {{ include (print $.Template.BasePath "/ConfigMap-app-properties.yaml") . | sha256sum }}
+      checksum/fluent-bit-config: {{ include (print $.Template.BasePath "/ConfigMap-fluent-bit.yaml") . | sha256sum }}
+      {{ if .Values.os.secman.enabled }}
+      checksum/secman-config: {{ include (print $.Template.BasePath "/ConfigMap-secman.yaml") . | sha256sum }}
+      {{- end }}
+
+    spec:
+      affinity:
+        podAntiAffinity: {{- include "application.antaffinities.pods" . | nindent 10 }}
+      volumes:
+        - name: fluent-bit-tmp
+          emptyDir: { }
+        - name: {{ .Values.app -}}-app-properties
+          configMap:
+            name: {{ .Values.app -}}-app-properties
+            defaultMode: 256
+        - name: tmp
+          emptyDir: { }
+        - name: {{ .Values.app -}}-app-logs
+          emptyDir: { }
+        - name: {{ .Values.app -}}-app-fluent-bit-cfg
+          configMap:
+            name: {{ .Values.app -}}-app-fluent-bit-cfg
+            defaultMode: 256
+        - name: {{ .Values.app -}}-properties
+          emptyDir: { }
+        {{- if .Values.secman.enabled }}
+        - name: {{ .Values.app -}}-secman
+          configMap:
+            name: {{ .Values.app -}}-secman
+            defaultMode: 256
+        {{- end }}
+      containers:
+        - name: {{ .Values.app }}
+          image: ...
+          command: [ "/bin/sh" ]
+          args: [...]
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+            - containerPort: 8443
+              protocol: TCP
+          volumeMounts:
+            - name: {{ .Values.app -}}-app-properties
+              mountPath: /app/config
+            - name: {{ .Values.app -}}-app-logs
+              mountPath: /app/logs
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.secman.enabled }}
+            - name: {{ .Values.app -}}-secman
+              readOnly: true
+              mountPath: /tmp/secman/config
+            {{- end }}
+            - name: {{ .Values.app -}}-properties
+              mountPath: /app/properties
+          env: 
+            - name: JAVA_OPTS
+              value: {{ .Values.os.containers.env.javaOpts }}
+            - name: POD
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldsPath: metadata.name
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldsPath: metadata.namespace
+          resources:
+            limits:
+              memory: {{ .Values.os.containers.app.resources.limits.mem }}
+              cpu: {{ .Values.os.containers.app.resources.limits.cpu }}
+            requests:
+              memory: {{ .Values.os.containers.app.resources.requests.mem }}
+              cpu: {{ .Values.os.containers.app.resources.requests.cpu }}
+          startupPrebe:
+            {{- toYaml .Values.os.containers.app.probes.startupProbe | nindent 12 }}
+          readinessPrebe:
+            {{- toYaml .Values.os.containers.app.probes.readinessPrebe | nindent 12 }}
+          livenessPrebe:
+            {{- toYaml .Values.os.containers.app.probes.livenessPrebe | nindent 12 }}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: Always
+          securityContext: {{- include "application.security_context" . | nindent 12 }}
+        - name: fluent-bit
+          image: ....
+          resources:
+            limits:
+              memory: {{ .Values.os.containers.fluent_bit.resources.limits.mem }}
+              cpu: {{ .Values.os.containers.fluent_bit.resources.limits.cpu }}
+            requests:
+              memory: {{ .Values.os.containers.fluent_bit.resources.requests.mem }}
+              cpu: {{ .Values.os.containers.fluent_bit.resources.requests.cpu }}
+          securityContext: {{- include "application.security_context" . | nindent 12 }}
+          imagePullPolicy: Always
+          env:
+            - name: moduleId
+              values: {{ .Values.app }}
+            - name: POD
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldsPath: metadata.name
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldsPath: metadata.namespace
+          volumeMounts:
+            - name: {{ .Values.app -}}-fluent-bit-cfg
+              mountPath: /fluent-bit/etc
+            - name: {{ .Values.app -}}-app-logs
+              mountPath: /opt/envoy/logs
+            - name: fluent-bit-tmp
+              mountPath: /tmp
+
+
+
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      securityContext: {}
+      schedulerName: default-scheduler

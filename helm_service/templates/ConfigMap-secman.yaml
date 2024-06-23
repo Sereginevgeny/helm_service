@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.app }}-secman
+data:
+  secman.txt: |-
+    {{- include "application.secman_config_map" $ | nindent 4 }}
